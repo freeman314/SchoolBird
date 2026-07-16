@@ -51,8 +51,20 @@
     background:linear-gradient(180deg,#ffe25e,#ff9f43); bottom:0; transition:bottom .06s linear;
     box-shadow:0 0 10px #ffe25e;
   }
-  #bigscore { font-size:64px; font-weight:900; color:#f4640e; margin:6px 0 2px; }
-  #best { color:#6b7a99; font-size:14px; margin-bottom:16px; }
+  #bigscore { font-size:56px; font-weight:900; color:#f4640e; margin:4px 0 0; }
+  #best { color:#6b7a99; font-size:13px; margin-bottom:10px; }
+  #prizeBox { text-align:left; margin-bottom:14px; }
+  .prz {
+    display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:10px;
+    font-size:13px; color:#6b7a99; margin-bottom:3px; background:#f6f2e3;
+  }
+  .prz .pts { min-width:34px; font-weight:800; text-align:right; color:#8a97b5; }
+  .prz.won {
+    background:linear-gradient(90deg,#ffe9c9,#ffd98f); color:#7a4a05; font-weight:700;
+    border:2px solid #f4a825; box-shadow:0 2px 8px rgba(244,168,37,.35);
+  }
+  .prz.won .pts { color:#c86e04; }
+  .prz.next { border:2px dashed #c9cfdd; background:#fbfaf3; }
   .err { color:#c0392b; font-size:13px; margin-top:12px; display:none; }
   .flag { display:inline-block; width:34px; height:22px; border-radius:4px; overflow:hidden; vertical-align:middle;
     box-shadow:0 2px 6px rgba(0,0,0,.2); }
@@ -84,6 +96,7 @@
     <div class="sub">Арэн врезался! Но до школы ещё можно успеть.</div>
     <div id="bigscore">0</div>
     <div id="best">Рекорд: 0</div>
+    <div id="prizeBox"></div>
     <button class="btn" id="retryBtn">ЕЩЁ РАЗ 🔄</button>
   </div>
 </div>
@@ -228,10 +241,14 @@ function ensureMasks() {
     };
   } catch (e) { masks = null; } // file:// таинтит canvas — откат на прямоугольники
 }
-// hero bounding box — exactly matches how the sprite is drawn
-function heroBox() {
+// hero shape — учитывает наклон (tilt) и покачивание (bob), как при отрисовке
+function heroShape() {
   const w = hero.r * 3.0, h = w * gen.hero.naturalHeight / gen.hero.naturalWidth;
-  return { x: hero.x - w * 0.48, y: hero.y - h * 0.5, w, h };
+  const cy = hero.y + Math.sin(t * 0.004) * 3;
+  const cos = Math.cos(hero.tilt), sin = Math.sin(hero.tilt);
+  const ex = 0.52 * w * Math.abs(cos) + 0.5 * h * Math.abs(sin);
+  const ey = 0.52 * w * Math.abs(sin) + 0.5 * h * Math.abs(cos);
+  return { cx: hero.x, cy, w, h, cos, sin, x: hero.x - ex, y: cy - ey, bw: ex * 2, bh: ey * 2 };
 }
 // same tiling as drawObstacles — collision geometry mirrors the pixels on screen
 function obstacleTiles(o) {
@@ -245,14 +262,18 @@ function obstacleTiles(o) {
       tiles.push({ kind: 'pom', x: o.x, y: y - ph, w: o.w, h: ph });
   return tiles;
 }
-function pixelHit(hb, hm, tile, tm) {
-  const x1 = Math.max(hb.x, tile.x), y1 = Math.max(hb.y, tile.y);
-  const x2 = Math.min(hb.x + hb.w, tile.x + tile.w), y2 = Math.min(hb.y + hb.h, tile.y + tile.h);
+function pixelHit(hs, hm, tile, tm) {
+  const x1 = Math.max(hs.x, tile.x), y1 = Math.max(hs.y, tile.y);
+  const x2 = Math.min(hs.x + hs.bw, tile.x + tile.w), y2 = Math.min(hs.y + hs.bh, tile.y + tile.h);
   if (x2 <= x1 || y2 <= y1) return false;
   for (let py = y1; py < y2; py += 2) {
     for (let px = x1; px < x2; px += 2) {
-      const hx = ((px - hb.x) / hb.w * hm.w) | 0, hy = ((py - hb.y) / hb.h * hm.h) | 0;
-      if (hm.a[hy * hm.w + hx] < 200) continue; // край героя прощаем
+      // точка мира -> локальные координаты повёрнутого спрайта героя
+      const dx = px - hs.cx, dy = py - hs.cy;
+      const lx = dx * hs.cos + dy * hs.sin, ly = -dx * hs.sin + dy * hs.cos;
+      const u = (lx + 0.48 * hs.w) / hs.w, v = (ly + 0.5 * hs.h) / hs.h;
+      if (u < 0 || u >= 1 || v < 0 || v >= 1) continue;
+      if (hm.a[((v * hm.h) | 0) * hm.w + ((u * hm.w) | 0)] < 200) continue; // край героя прощаем
       const tx = ((px - tile.x) / tile.w * tm.w) | 0, ty = ((py - tile.y) / tile.h * tm.h) | 0;
       if (tm.a[ty * tm.w + tx] > 120) return true;
     }
@@ -295,10 +316,16 @@ function flap() {
 
 /* ================= OBSTACLES ================= */
 function spawnObstacle() {
-  const gapH = Math.max(H * 0.30 - score * 3, H * 0.19); // narrows with score
-  const margin = H * 0.12;
-  const gapY = margin + Math.random() * (H - margin * 2 - gapH);
-  obstacles.push({ x: W + 80, gapY, gapH, w: Math.max(64, W*0.13), passed:false });
+  // старт легче; ворота сжимаются на 1% с каждым очком (но не уже 17% экрана)
+  const gapH = Math.max(H * 0.36 * Math.pow(0.99, score), H * 0.17);
+  const margin = H * 0.10;
+  // перепад высот: сначала соседние ворота почти на одном уровне, дальше разброс растёт
+  const last = obstacles[obstacles.length - 1];
+  const prevC = last ? last.gapY + last.gapH / 2 : hero.y;
+  const maxJump = H * (0.06 + Math.min(score * 0.012, 0.42));
+  let c = prevC + (Math.random() * 2 - 1) * maxJump;
+  c = Math.max(margin + gapH / 2, Math.min(H - margin - gapH / 2, c));
+  obstacles.push({ x: W + 80, gapY: c - gapH / 2, gapH, w: Math.max(64, W*0.13), passed:false });
 }
 
 /* ================= UPDATE ================= */
@@ -327,7 +354,7 @@ function update(dt) {
   // move & collide
   ensureMasks();
   const usePixels = masks && ok(gen.hero);
-  const hb = usePixels ? heroBox() : null;
+  const hb = usePixels ? heroShape() : null;
   for (const o of obstacles) {
     o.x -= spd;
     if (!o.passed && o.x + o.w < hero.x - hero.r) {
@@ -336,7 +363,7 @@ function update(dt) {
     }
     if (usePixels) {
       // pixel-perfect: only real opaque pixels kill
-      if (hb.x < o.x + o.w && hb.x + hb.w > o.x) {
+      if (hb.x < o.x + o.w && hb.x + hb.bw > o.x) {
         for (const tile of obstacleTiles(o))
           if (pixelHit(hb, masks.hero, tile, masks[tile.kind]))
             return gameOver();
@@ -504,12 +531,42 @@ function loop(ts) {
 const startOverlay = document.getElementById('startOverlay');
 const overOverlay = document.getElementById('overOverlay');
 
+// таблица призов: сверху вниз, побеждает высшая достигнутая ступень
+const PRIZES = [
+  { min: 100, icon: '🏆', label: 'iPhone' },
+  { min: 90,  icon: '📱', label: 'Смартфон' },
+  { min: 80,  icon: '📲', label: 'Honor' },
+  { min: 70,  icon: '🎟️', label: 'Скидка 20% на телефон' },
+  { min: 20,  icon: '🏷️', label: 'Скидка 5% на телефон' },
+  { min: 5,   icon: '⭐', label: 'Наклейка Team в офисе' },
+];
+
+function renderPrizes(sc) {
+  const wonIdx = PRIZES.findIndex(p => sc >= p.min); // первая сверху достигнутая
+  const nextIdx = wonIdx === -1 ? PRIZES.length - 1 : wonIdx - 1; // следующая цель
+  let html = '';
+  PRIZES.forEach((p, i) => {
+    const cls = i === wonIdx ? 'prz won' : (i === nextIdx ? 'prz next' : 'prz');
+    const mark = i === wonIdx ? ' ✅' : '';
+    html += `<div class="${cls}"><span class="pts">${p.min}</span><span>${p.icon}</span><span>${p.label}${mark}</span></div>`;
+  });
+  if (wonIdx === -1) {
+    const need = PRIZES[PRIZES.length - 1].min - sc;
+    html += `<div style="text-align:center;font-size:12px;color:#6b7a99;margin-top:6px;">Ещё ${need} очк. — и наклейка твоя!</div>`;
+  } else if (nextIdx >= 0) {
+    const need = PRIZES[nextIdx].min - sc;
+    html += `<div style="text-align:center;font-size:12px;color:#6b7a99;margin-top:6px;">До «${PRIZES[nextIdx].label}» ещё ${need} очк.</div>`;
+  }
+  document.getElementById('prizeBox').innerHTML = html;
+}
+
 function gameOver() {
   state = 'over';
   best = Math.max(best, score);
   localStorage.setItem('bts_best', best);
   document.getElementById('bigscore').textContent = score;
   document.getElementById('best').textContent = 'Рекорд: ' + best;
+  renderPrizes(score);
   HUD.classList.add('hidden');
   overOverlay.classList.remove('hidden');
   if (navigator.vibrate) navigator.vibrate(120);
