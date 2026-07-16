@@ -63,24 +63,6 @@
 <canvas id="game"></canvas>
 
 <div id="hud" class="hidden"><div id="score">0</div></div>
-<div id="diag" class="hidden" style="position:fixed;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));z-index:6;pointer-events:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:#fff;background:rgba(43,58,103,.72);padding:8px 10px;border-radius:12px;min-width:150px;">
-  <div id="diagMic">🎤 …</div>
-  <div style="display:flex;align-items:center;gap:6px;">🔊
-    <div style="flex:1;height:8px;background:rgba(255,255,255,.25);border-radius:99px;overflow:hidden;">
-      <div id="diagVol" style="height:100%;width:0%;background:linear-gradient(90deg,#ffe25e,#ff9f43);border-radius:99px;"></div>
-    </div>
-    <span id="diagVolTxt" style="min-width:34px;text-align:right;">0%</span>
-  </div>
-  <div id="diagPitch">🎵 —</div>
-</div>
-<div id="micHint" class="hidden" style="position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;z-index:5;pointer-events:none;">
-  <span style="background:rgba(43,58,103,.75);color:#fff;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px;">🎤 нет микрофона — держи палец на экране, чтобы лететь вверх</span>
-</div>
-<div id="flyWrap" class="hidden" style="position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;z-index:7;">
-  <div style="margin-bottom:10px;"><span style="background:rgba(43,58,103,.78);color:#fff;font-size:14px;font-weight:700;padding:8px 16px;border-radius:999px;">🎤 Разминка: поуправляй голосом вверх-вниз</span></div>
-  <button class="btn" id="flyBtn">ПОЛЕТЕЛИ ▶</button>
-</div>
-<div id="micbar" class="hidden"><div id="micfill"></div></div>
 
 <!-- START -->
 <div id="startOverlay" class="overlay">
@@ -89,15 +71,9 @@
     <div class="sub">
       <span class="flag"><div style="background:#d90012"></div><div style="background:#0033a0"></div><div style="background:#f2a800"></div></span>
       &nbsp;Каникулы кончились! Помоги Арэну долететь до школы над долиной Арарата.<br><br>
-      🎤 <b>Пой в микрофон:</b> выше нота — выше летишь, ниже нота — опускаешься. Молчишь — падаешь!<br>
-      Сначала будет <b>разминка</b> — потренируйся, потом жми «Полетели».
-    </div>
-    <div class="modes">
-      <button class="mode on" id="modePitch">🎵 Высота тона<small>пой ноты</small></button>
-      <button class="mode" id="modeVol">📢 Громкость<small>кричи громче</small></button>
+      👆 <b>Тапай по экрану</b> — Арэн взмахивает и взлетает. Не тапаешь — падает. Пролетай между стопками книг и гранатовыми ветками!
     </div>
     <button class="btn" id="startBtn">СТАРТ ▶</button>
-    <div class="err" id="micErr">Не удалось включить микрофон 😢<br>Разреши доступ и попробуй снова. Пока можно играть, удерживая палец на экране.</div>
   </div>
 </div>
 
@@ -284,162 +260,37 @@ function pixelHit(hb, hm, tile, tm) {
   return false;
 }
 
-/* ================= AUDIO (mic) ================= */
-let audioCtx = null, analyser = null, timeBuf = null, micReady = false;
-let controlMode = 'pitch'; // 'pitch' | 'volume'
-
-async function initMic() {
-  // audioCtx is created synchronously in the click handler (iOS requirement)
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
-  });
-  if (audioCtx.state === 'suspended') await audioCtx.resume();
-  const src = audioCtx.createMediaStreamSource(stream);
-  analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 2048;
-  src.connect(analyser);
-  timeBuf = new Float32Array(analyser.fftSize);
-  micReady = true;
-}
-
-// RMS volume 0..1
-function getRMS() {
-  analyser.getFloatTimeDomainData(timeBuf);
-  let s = 0;
-  for (let i = 0; i < timeBuf.length; i++) s += timeBuf[i] * timeBuf[i];
-  return Math.sqrt(s / timeBuf.length);
-}
-
-// Autocorrelation pitch detection -> Hz or -1
-function detectPitch() {
-  analyser.getFloatTimeDomainData(timeBuf); // FIX: буфер раньше не заполнялся в режиме pitch!
-  const buf = timeBuf, N = buf.length, sr = audioCtx.sampleRate;
-  let rms = 0;
-  for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
-  rms = Math.sqrt(rms / N);
-  if (rms < 0.008) return -1; // silence gate
-
-  // trim quiet edges
-  let r1 = 0, r2 = N - 1;
-  const thr = 0.2;
-  for (let i = 0; i < N / 2; i++) if (Math.abs(buf[i]) < thr) { r1 = i; break; }
-  for (let i = 1; i < N / 2; i++) if (Math.abs(buf[N - i]) < thr) { r2 = N - i; break; }
-  const size = r2 - r1;
-  if (size < 200) return -1;
-
-  const c = new Float32Array(size);
-  for (let lag = 0; lag < size; lag++)
-    for (let i = 0; i < size - lag; i++)
-      c[lag] += buf[r1 + i] * buf[r1 + i + lag];
-
-  let d = 0; while (d < size - 1 && c[d] > c[d + 1]) d++;
-  let maxv = -1, maxp = -1;
-  for (let i = d; i < size; i++) if (c[i] > maxv) { maxv = c[i]; maxp = i; }
-  if (maxp <= 0) return -1;
-
-  // parabolic interpolation
-  let T = maxp;
-  const x1 = c[T - 1] || 0, x2 = c[T], x3 = c[T + 1] || 0;
-  const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
-  if (a) T = T - b / (2 * a);
-
-  const f = sr / T;
-  return (f > 70 && f < 1200) ? f : -1;
-}
+/* ================= MUSIC ================= */
+const music = new Audio('assets/music.mp3');
+music.loop = true;
+music.volume = 0.55;
 
 /* ================= GAME STATE ================= */
 const HUD = document.getElementById('hud');
-const MICBAR = document.getElementById('micbar');
-const MICFILL = document.getElementById('micfill');
 const scoreEl = document.getElementById('score');
 
 let state = 'menu'; // menu | play | over
 let hero = { x:0, y:0, vy:0, r:26, tilt:0 };
-let targetY = null;      // where the voice wants us to be (null = no signal)
 let obstacles = [];      // {x, gapY, gapH, w, passed}
 let score = 0, best = +(localStorage.getItem('bts_best') || 0);
 let speed = 0, t = 0;
-let touching = false;    // fallback control
-let smoothedPitch = 0, pitchAlive = 0;
 let clouds = [];
 
 function resetGame() {
   hero.x = W * 0.26; hero.y = H * 0.45; hero.vy = 0; hero.tilt = 0;
   obstacles = []; score = 0; t = 0;
   speed = Math.max(W, 360) * 0.0027;   // px per ms-ish, scaled below (чуть медленнее)
-  targetY = null; smoothedPitch = 0; pitchAlive = 0;
   scoreEl.textContent = '0';
   clouds = Array.from({length:5}, () => ({
     x: Math.random()*W, y: Math.random()*H*0.5, s: 0.4+Math.random()*0.8
   }));
 }
 
-/* ================= INPUT MAPPING ================= */
-// pitch range sung ↔ screen: ~130Hz (низко) … ~600Hz (высоко), log scale
-const PITCH_LO = 130, PITCH_HI = 600;
-function pitchToY(f) {
-  const k = (Math.log(f) - Math.log(PITCH_LO)) / (Math.log(PITCH_HI) - Math.log(PITCH_LO));
-  const kk = Math.min(1, Math.max(0, k));
-  return H * 0.92 - kk * H * 0.84; // высокая нота -> верх экрана
-}
-let diagFrame = 0, lastF = -1, lastK = 0, volPeak = 0.05;
-function readVoice() {
-  if (!micReady) { updateDiag(0, -1); return; }
-  const v = getRMS(); // always measured — feeds the signal indicator
-  if (controlMode === 'pitch') {
-    const f = detectPitch();
-    lastF = f;
-    if (f > 0) {
-      smoothedPitch = smoothedPitch ? smoothedPitch * 0.7 + f * 0.3 : f;
-      pitchAlive = 20; // ~0.33с удержания последней ноты — паузы в голосе не роняют
-    } else if (pitchAlive > 0) pitchAlive--;
-    if (pitchAlive > 0 && smoothedPitch) {
-      targetY = pitchToY(smoothedPitch);
-      const k = (Math.log(smoothedPitch)-Math.log(PITCH_LO))/(Math.log(PITCH_HI)-Math.log(PITCH_LO));
-      MICFILL.style.bottom = (Math.min(1,Math.max(0,k))*88) + '%';
-    } else { targetY = null; MICFILL.style.bottom = '0%'; }
-  } else {
-    lastF = -1;
-    // автокалибровка: пик твоего голоса = верх экрана, что бы ни выдавал микрофон
-    if (v > volPeak) volPeak = v; else volPeak = Math.max(0.025, volPeak * 0.9995);
-    const k = Math.max(0, Math.min(1, (v - 0.010) / (volPeak * 0.80 - 0.010)));
-    lastK = k;
-    if (k > 0.03) {
-      targetY = H * 0.92 - k * H * 0.84;
-      MICFILL.style.bottom = (k * 88) + '%';
-    } else { targetY = null; MICFILL.style.bottom = '0%'; }
-  }
-  updateDiag(v, lastF);
-}
-
-// signal-strength indicator (top-left)
-const diagMic = document.getElementById('diagMic');
-const diagVol = document.getElementById('diagVol');
-const diagVolTxt = document.getElementById('diagVolTxt');
-const diagPitch = document.getElementById('diagPitch');
-function updateDiag(rms, f) {
-  if (diagFrame++ % 4 !== 0) return; // не дёргаем DOM каждый кадр
-  if (!micReady) {
-    diagMic.textContent = micRequested ? '🎤 жду доступ…' : '🎤 ❌ нет доступа';
-    diagVol.style.width = '0%'; diagVolTxt.textContent = '0%'; diagPitch.textContent = '🎵 —';
-    return;
-  }
-  diagMic.textContent = (audioCtx && audioCtx.state !== 'running')
-    ? '🎤 ⏸ звук на паузе — тапни экран'
-    : '🎤 ✅ слушаю';
-  // в режиме громкости показываем откалиброванную силу (то, что видит игра)
-  const pct = controlMode === 'volume'
-    ? Math.min(100, Math.round(lastK * 100))
-    : Math.min(100, Math.round(rms * 400));
-  diagVol.style.width = pct + '%';
-  diagVolTxt.textContent = pct + '%';
-  if (controlMode === 'pitch') {
-    diagPitch.textContent = (pitchAlive > 0 && smoothedPitch)
-      ? '🎵 ' + Math.round(smoothedPitch) + ' Гц ' + (smoothedPitch > 300 ? '⬆️' : '⬇️')
-      : '🎵 — (пой громче)';
-  } else {
-    diagPitch.textContent = '📢 сила голоса: ' + pct + '%';
-  }
+/* ================= INPUT: tap to flap ================= */
+function flap() {
+  if (state !== 'play') return;
+  hero.vy = -0.0096 * H; // взмах
+  hero.tilt = -0.4;
 }
 
 /* ================= OBSTACLES ================= */
@@ -453,44 +304,17 @@ function spawnObstacle() {
 /* ================= UPDATE ================= */
 function update(dt) {
   t += dt;
-  readVoice();
 
-  // hero physics
-  if (touching && !micReady) {
-    hero.vy -= 0.0016 * dt * H; // fallback: hold to rise
-  }
-  if (targetY !== null) {
-    // voice steers: spring toward target — вниз мягче, чем вверх
-    const diff = targetY - hero.y;
-    const gain = diff > 0 ? 0.00016 : 0.00035;
-    hero.vy += diff * gain * dt;
-    hero.vy *= 0.90;
-    const maxDown = H * 0.0035; // ограничение скорости снижения
-    if (hero.vy > maxDown) hero.vy = maxDown;
-  } else {
-    hero.vy += 0.0007 * dt * (H / 640); // gravity when silent (смягчена)
-    const maxFall = H * 0.0046;
-    if (hero.vy > maxFall) hero.vy = maxFall;
-  }
-  hero.vy = Math.max(-0.9, Math.min(0.9, hero.vy / H)) * H; // clamp relative
+  // flappy physics: гравитация + взмахи по тапу
+  hero.vy += 0.000023 * H * dt;
+  const maxFall = 0.0155 * H;
+  if (hero.vy > maxFall) hero.vy = maxFall;
   hero.y += hero.vy * dt * 0.06;
   hero.tilt += ((hero.vy > 0 ? 0.35 : -0.35) - hero.tilt) * 0.08;
 
   // bounds
   if (hero.y < hero.r) { hero.y = hero.r; hero.vy = 0; }
-  if (hero.y > H - hero.r*0.6) {
-    if (state !== 'play') { hero.y = H - hero.r*0.6; hero.vy = 0; }
-    else return gameOver();
-  }
-
-  // разминка: только вертикальное управление, мир стоит на месте
-  if (state === 'practice') {
-    for (const c of clouds) {
-      c.x -= 0.02 * dt * c.s;
-      if (c.x < -160) { c.x = W + 160; c.y = Math.random()*H*0.5; }
-    }
-    return;
-  }
+  if (hero.y > H - hero.r*0.6) return gameOver();
 
   // difficulty (разгон с очками — мягче)
   const spd = speed * (1 + Math.min(score * 0.02, 0.8)) * dt * 0.06;
@@ -672,7 +496,7 @@ function loop(ts) {
   raf = requestAnimationFrame(loop);
   const dt = Math.min(ts - last, 40); last = ts;
   if (!W || !H) { resize(); return; } // фоновая вкладка: вьюпорт ещё нулевой
-  if (state === 'play' || state === 'practice') update(dt);
+  if (state === 'play') update(dt);
   draw();
 }
 
@@ -686,68 +510,28 @@ function gameOver() {
   localStorage.setItem('bts_best', best);
   document.getElementById('bigscore').textContent = score;
   document.getElementById('best').textContent = 'Рекорд: ' + best;
-  HUD.classList.add('hidden'); MICBAR.classList.add('hidden');
-  document.getElementById('diag').classList.add('hidden');
-  document.getElementById('micHint').classList.add('hidden');
-  document.getElementById('flyWrap').classList.add('hidden');
+  HUD.classList.add('hidden');
   overOverlay.classList.remove('hidden');
   if (navigator.vibrate) navigator.vibrate(120);
 }
 
-let micRequested = false;
 function startGame() {
-  // create/resume AudioContext synchronously inside the user gesture (iOS)
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  // request mic in parallel — game starts immediately, voice attaches when granted
-  if (!micReady && !micRequested) {
-    micRequested = true;
-    initMic().then(() => {
-      document.getElementById('micErr').style.display = 'none';
-      document.getElementById('micHint').classList.add('hidden');
-      if (state === 'play') MICBAR.classList.remove('hidden');
-    }).catch(() => {
-      micRequested = false;
-      document.getElementById('micErr').style.display = 'block';
-      if (state === 'play') document.getElementById('micHint').classList.remove('hidden');
-    });
-  }
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   resetGame();
-  state = 'practice'; // сначала разминка: голос работает, мир стоит
+  state = 'play';
   startOverlay.classList.add('hidden');
   overOverlay.classList.add('hidden');
-  HUD.classList.add('hidden');
-  document.getElementById('flyWrap').classList.remove('hidden');
-  document.getElementById('diag').classList.remove('hidden');
-  if (micReady) MICBAR.classList.remove('hidden');
-}
-
-document.getElementById('flyBtn').addEventListener('click', e => {
-  e.stopPropagation();
-  if (state !== 'practice') return;
-  state = 'play';
-  document.getElementById('flyWrap').classList.add('hidden');
   HUD.classList.remove('hidden');
-});
+  music.play().catch(() => {}); // фоновая музыка (жест пользователя уже есть)
+  flap(); // стартовый взмах, чтобы не падать сразу
+}
 
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('retryBtn').addEventListener('click', startGame);
 
-const mp = document.getElementById('modePitch'), mv = document.getElementById('modeVol');
-mp.addEventListener('click', () => { controlMode='pitch'; mp.classList.add('on'); mv.classList.remove('on'); });
-mv.addEventListener('click', () => { controlMode='volume'; mv.classList.add('on'); mp.classList.remove('on'); });
-
-// fallback touch control (if mic denied) + revive suspended audio on tap
-window.addEventListener('pointerdown', () => {
-  touching = true;
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-});
-window.addEventListener('pointerup', () => touching = false);
-window.addEventListener('pointercancel', () => touching = false);
-
-// debug: keyboard for desktop testing
+// tap / click / space = взмах
+window.addEventListener('pointerdown', flap);
 window.addEventListener('keydown', e => {
-  if (e.key === 'ArrowUp') { targetY = null; hero.vy = -H*0.006; }
+  if (e.code === 'Space' || e.key === 'ArrowUp') { e.preventDefault(); flap(); }
 });
 
 requestAnimationFrame(ts => { last = ts; loop(ts); });
