@@ -52,8 +52,20 @@
   .btn:active { transform:translateY(4px); box-shadow:0 2px 0 #c24a05; }
   .btn.ghost { background:#e8eef6; color:#2b3a67; box-shadow:0 6px 0 #b9c6d8; font-size:16px; padding:11px 26px; }
   .btn.ghost:active { box-shadow:0 2px 0 #b9c6d8; }
-  #bigdist { font-size:48px; font-weight:900; color:#f4640e; margin:4px 0 0; }
-  .statrow { font-size:14px; color:#6b7a99; margin-bottom:14px; }
+  #bigdist { font-size:44px; font-weight:900; color:#f4640e; margin:4px 0 0; }
+  .statrow { font-size:13px; color:#6b7a99; margin-bottom:10px; }
+  #prizeBox { text-align:left; margin-bottom:14px; }
+  .prz {
+    display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:10px;
+    font-size:13px; color:#6b7a99; margin-bottom:3px; background:#f6f2e3;
+  }
+  .prz .pts { min-width:40px; font-weight:800; text-align:right; color:#8a97b5; }
+  .prz.won {
+    background:linear-gradient(90deg,#ffe9c9,#ffd98f); color:#7a4a05; font-weight:700;
+    border:2px solid #f4a825; box-shadow:0 2px 8px rgba(244,168,37,.35);
+  }
+  .prz.won .pts { color:#c86e04; }
+  .prz.next { border:2px dashed #c9cfdd; background:#fbfaf3; }
 </style>
 </head>
 <body>
@@ -87,6 +99,7 @@
     <div class="sub">Но Арэн обязательно убежит в следующий раз.</div>
     <div id="bigdist">0 м</div>
     <div class="statrow" id="stats">Решено примеров: 0 · Рекорд: 0 м</div>
+    <div id="prizeBox"></div>
     <button class="btn" id="retryBtn">ЕЩЁ РАЗ 🔄</button>
     <div style="margin-top:12px;"><button class="btn ghost" onclick="location.href='index.html'">🏠 Меню</button></div>
   </div>
@@ -443,12 +456,39 @@ function loop(ts) {
 const startOverlay = document.getElementById('startOverlay');
 const overOverlay = document.getElementById('overOverlay');
 
+// те же призы, что в «Полёте в школу», пороги под темп арифметики
+const PRIZES = [
+  { min: 300, icon: '🏆', label: 'iPhone' },
+  { min: 250, icon: '📱', label: 'Смартфон' },
+  { min: 200, icon: '📲', label: 'Honor' },
+  { min: 150, icon: '🎟️', label: 'Скидка 20% на телефон' },
+  { min: 50,  icon: '🏷️', label: 'Скидка 5% на телефон' },
+  { min: 15,  icon: '⭐', label: 'Наклейка Team в офисе' },
+];
+function renderPrizes(sc) {
+  const wonIdx = PRIZES.findIndex(p => sc >= p.min);
+  const nextIdx = wonIdx === -1 ? PRIZES.length - 1 : wonIdx - 1;
+  let html = '';
+  PRIZES.forEach((p, i) => {
+    const cls = i === wonIdx ? 'prz won' : (i === nextIdx ? 'prz next' : 'prz');
+    const mark = i === wonIdx ? ' ✅' : '';
+    html += `<div class="${cls}"><span class="pts">${p.min}</span><span>${p.icon}</span><span>${p.label}${mark}</span></div>`;
+  });
+  if (wonIdx === -1) {
+    html += `<div style="text-align:center;font-size:12px;color:#6b7a99;margin-top:6px;">Ещё ${PRIZES[PRIZES.length-1].min - sc} очк. — и наклейка твоя!</div>`;
+  } else if (nextIdx >= 0) {
+    html += `<div style="text-align:center;font-size:12px;color:#6b7a99;margin-top:6px;">До «${PRIZES[nextIdx].label}» ещё ${PRIZES[nextIdx].min - sc} очк.</div>`;
+  }
+  document.getElementById('prizeBox').innerHTML = html;
+}
+
 function showGameOver() {
   state = 'over';
   best = Math.max(best, score);
   localStorage.setItem('arif_best_pts', best);
   document.getElementById('bigdist').textContent = score + ' очк.';
   document.getElementById('stats').textContent = `Пробег: ${Math.floor(dist)} м · Решено: ${solved} · Рекорд: ${best} очк.`;
+  renderPrizes(score);
   overOverlay.classList.remove('hidden');
   panel.classList.remove('alarm');
 }
