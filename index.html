@@ -76,8 +76,21 @@
 
 <div id="hud" class="hidden"><div id="score">0</div></div>
 
+<!-- MENU -->
+<div id="menuOverlay" class="overlay">
+  <div class="card">
+    <h1>Снова в школу! 🎒</h1>
+    <div class="sub">
+      <span class="flag"><div style="background:#d90012"></div><div style="background:#0033a0"></div><div style="background:#f2a800"></div></span>
+      &nbsp;Две игры — выбирай!
+    </div>
+    <button class="btn" id="menuFly" style="width:100%;margin-bottom:12px;">✈️ Полёт в школу</button>
+    <button class="btn" id="menuArif" style="width:100%;background:linear-gradient(180deg,#5cb85c,#3d8b3d);box-shadow:0 6px 0 #2d6a2d, 0 10px 20px rgba(0,0,0,.25);">🧮 Быстрая арифметика</button>
+  </div>
+</div>
+
 <!-- START -->
-<div id="startOverlay" class="overlay">
+<div id="startOverlay" class="overlay hidden">
   <div class="card">
     <h1>Полёт в школу</h1>
     <div class="sub">
@@ -86,6 +99,7 @@
       👆 <b>Тапай по экрану</b> — Арэн взмахивает и взлетает. Не тапаешь — падает. Пролетай между стопками книг и гранатовыми ветками!
     </div>
     <button class="btn" id="startBtn">СТАРТ ▶</button>
+    <div style="margin-top:12px;"><button class="mode" id="backToMenu" style="flex:none;padding:8px 18px;">🏠 Меню</button></div>
   </div>
 </div>
 
@@ -98,6 +112,7 @@
     <div id="best">Рекорд: 0</div>
     <div id="prizeBox"></div>
     <button class="btn" id="retryBtn">ЕЩЁ РАЗ 🔄</button>
+    <div style="margin-top:12px;"><button class="mode" id="overToMenu" style="flex:none;padding:8px 18px;">🏠 Меню</button></div>
   </div>
 </div>
 
@@ -584,6 +599,22 @@ function startGame() {
 
 document.getElementById('startBtn').addEventListener('click', startGame);
 document.getElementById('retryBtn').addEventListener('click', startGame);
+
+// навигация меню
+const menuOverlay = document.getElementById('menuOverlay');
+document.getElementById('menuFly').addEventListener('click', () => {
+  menuOverlay.classList.add('hidden');
+  startOverlay.classList.remove('hidden');
+});
+document.getElementById('menuArif').addEventListener('click', () => location.href = 'arithmetic.html');
+document.getElementById('backToMenu').addEventListener('click', () => {
+  startOverlay.classList.add('hidden');
+  menuOverlay.classList.remove('hidden');
+});
+document.getElementById('overToMenu').addEventListener('click', () => {
+  overOverlay.classList.add('hidden');
+  menuOverlay.classList.remove('hidden');
+});
 
 // tap / click / space = взмах
 window.addEventListener('pointerdown', flap);
