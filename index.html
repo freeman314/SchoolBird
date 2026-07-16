@@ -73,6 +73,7 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<div id="toast" class="hidden" style="position:fixed;bottom:calc(30px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;z-index:20;pointer-events:none;"><span style="background:rgba(43,58,103,.9);color:#fff;font-size:14px;font-weight:700;padding:10px 18px;border-radius:999px;">📋</span></div>
 <button id="sndBtn" style="position:fixed;top:calc(10px + env(safe-area-inset-top));right:10px;z-index:8;border:none;background:rgba(255,251,233,.9);border-radius:50%;width:42px;height:42px;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;">🔊</button>
 
 <div id="hud" class="hidden"><div id="score">0</div></div>
@@ -113,6 +114,7 @@
     <div id="best">Рекорд: 0</div>
     <div id="prizeBox"></div>
     <button class="btn" id="retryBtn">ЕЩЁ РАЗ 🔄</button>
+    <div style="margin-top:10px;"><button class="btn" id="shareBtn" style="background:linear-gradient(180deg,#4aa3df,#2a6fb0);box-shadow:0 6px 0 #1d5384, 0 10px 20px rgba(0,0,0,.25);font-size:16px;padding:11px 30px;">📤 Поделиться</button></div>
     <div style="margin-top:12px;"><button class="mode" id="overToMenu" style="flex:none;padding:8px 18px;">🏠 Меню</button></div>
   </div>
 </div>
@@ -634,6 +636,53 @@ window.addEventListener('pointerdown', flap);
 window.addEventListener('keydown', e => {
   if (e.code === 'Space' || e.key === 'ArrowUp') { e.preventDefault(); flap(); }
 });
+
+
+/* ================= SHARE ================= */
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.firstElementChild.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 2200);
+}
+function makeShareImage(bigText, subText, prizeText) {
+  const c = document.createElement('canvas');
+  c.width = 1080; c.height = 1080;
+  const x = c.getContext('2d');
+  if (ok(gen.bg)) {
+    const s = Math.max(1080 / gen.bg.naturalWidth, 1080 / gen.bg.naturalHeight);
+    x.drawImage(gen.bg, (1080 - gen.bg.naturalWidth * s) / 2, (1080 - gen.bg.naturalHeight * s) / 2,
+      gen.bg.naturalWidth * s, gen.bg.naturalHeight * s);
+  } else { x.fillStyle = '#7ec8f0'; x.fillRect(0, 0, 1080, 1080); }
+  x.fillStyle = 'rgba(20,40,70,.45)'; x.fillRect(0, 0, 1080, 1080);
+  if (ok(gen.hero)) x.drawImage(gen.hero, 60, 90, 300, 300 * gen.hero.naturalHeight / gen.hero.naturalWidth);
+  x.textAlign = 'center'; x.fillStyle = '#fff';
+  x.font = '900 64px system-ui'; x.fillText('Полёт в школу 🎒', 540, 520);
+  x.font = '900 200px system-ui'; x.fillStyle = '#ffe25e'; x.fillText(bigText, 540, 730);
+  x.font = '700 44px system-ui'; x.fillStyle = '#fff'; x.fillText(subText, 540, 810);
+  if (prizeText) { x.font = '800 52px system-ui'; x.fillStyle = '#ffd98f'; x.fillText(prizeText, 540, 900); }
+  x.font = '600 36px system-ui'; x.fillStyle = '#cfe6ff'; x.fillText(location.host + location.pathname, 540, 1000);
+  return new Promise(res => c.toBlob(res, 'image/png'));
+}
+async function shareResult() {
+  const won = PRIZES.find(p => score >= p.min);
+  const prizeText = won ? won.icon + ' Мой приз: ' + won.label : '';
+  const text = `Я набрал ${score} очк. в «Полёте в школу» 🎒✈️ ${won ? 'Выиграл: ' + won.label + '! ' : ''}Попробуй обогнать!`;
+  const url = location.href.split('#')[0];
+  try {
+    const blob = await makeShareImage(String(score), 'очков', prizeText);
+    const file = new File([blob], 'school-flight.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Полёт в школу', text: text + ' ' + url });
+      return;
+    }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.share({ title: 'Полёт в школу', text, url }); return; }
+  catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(text + ' ' + url); toast('Скопировано — вставь в чат! 📋'); }
+  catch (e) { toast('Не удалось поделиться 😢'); }
+}
+document.getElementById('shareBtn').addEventListener('click', shareResult);
 
 requestAnimationFrame(ts => { last = ts; loop(ts); });
 </script>
