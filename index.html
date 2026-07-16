@@ -358,7 +358,7 @@ let hero = { x:0, y:0, vy:0, r:26, tilt:0 };
 let targetY = null;      // where the voice wants us to be (null = no signal)
 let obstacles = [];      // {x, gapY, gapH, w, passed}
 let score = 0, best = +(localStorage.getItem('bts_best') || 0);
-let speed = 0, spawnTimer = 0, t = 0;
+let speed = 0, t = 0;
 let touching = false;    // fallback control
 let smoothedPitch = 0, pitchAlive = 0;
 let clouds = [];
@@ -366,8 +366,8 @@ let clouds = [];
 function resetGame() {
   hero.x = W * 0.26; hero.y = H * 0.45; hero.vy = 0; hero.tilt = 0;
   obstacles = []; score = 0; t = 0;
-  speed = Math.max(W, 360) * 0.0032;   // px per ms-ish, scaled below
-  spawnTimer = 0; targetY = null; smoothedPitch = 0; pitchAlive = 0;
+  speed = Math.max(W, 360) * 0.0027;   // px per ms-ish, scaled below (чуть медленнее)
+  targetY = null; smoothedPitch = 0; pitchAlive = 0;
   scoreEl.textContent = '0';
   clouds = Array.from({length:5}, () => ({
     x: Math.random()*W, y: Math.random()*H*0.5, s: 0.4+Math.random()*0.8
@@ -492,15 +492,13 @@ function update(dt) {
     return;
   }
 
-  // difficulty
-  const spd = speed * (1 + Math.min(score * 0.03, 1.2)) * dt * 0.06;
+  // difficulty (разгон с очками — мягче)
+  const spd = speed * (1 + Math.min(score * 0.02, 0.8)) * dt * 0.06;
 
-  // spawn
-  spawnTimer -= dt;
-  if (spawnTimer <= 0) {
-    spawnObstacle();
-    spawnTimer = Math.max(2400 - score * 40, 1500);
-  }
+  // spawn по расстоянию, а не по времени: на узком экране колонны не слипаются
+  const spacing = Math.max(W * 0.55, 330) * Math.max(0.72, 1 - score * 0.008);
+  const lastO = obstacles[obstacles.length - 1];
+  if (!lastO || lastO.x < W + 80 - spacing) spawnObstacle();
 
   // move & collide
   ensureMasks();
