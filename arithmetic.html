@@ -69,6 +69,7 @@
 </style>
 </head>
 <body>
+<button id="sndBtn" style="position:fixed;top:calc(44px + env(safe-area-inset-top));right:10px;z-index:8;border:none;background:rgba(255,251,233,.9);border-radius:50%;width:42px;height:42px;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;">🔊</button>
 <div id="wrap">
   <canvas id="game"></canvas>
   <div id="panel">
@@ -83,7 +84,7 @@
     <h1>Быстрая арифметика</h1>
     <div class="sub">
       🐺 За Арэном гонятся волки! Он бежит быстрее, но на дороге препятствия.<br><br>
-      ⚡ Прыжок через препятствие стоит <b>1 батарейку</b>.<br>
+      ⚡ Прыжок: бревно — <b>1 батарейка</b>, камень — <b>2</b>!<br>
       🧮 Решай примеры на клавиатуре — за каждый пример <b>+батарейки</b>!<br>
       Нет батареек — Арэн спотыкается, и волки его догоняют 😱
     </div>
@@ -134,6 +135,18 @@ const ok = i => i.complete && i.naturalWidth > 0;
 
 const music = new Audio('assets/music.mp3');
 music.loop = true; music.volume = 0.5;
+// кнопка звука (настройка общая для обеих игр)
+const sndBtn = document.getElementById('sndBtn');
+let muted = localStorage.getItem('snd_muted') === '1';
+function applyMute() { music.muted = muted; sndBtn.textContent = muted ? '🔇' : '🔊'; }
+sndBtn.addEventListener('pointerdown', e => e.stopPropagation());
+sndBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  muted = !muted;
+  localStorage.setItem('snd_muted', muted ? '1' : '0');
+  applyMute();
+});
+applyMute();
 
 /* ================= МАТЕМАТИКА: генератор с ростом сложности =================
    Уровень растёт с числом решённых примеров (каждые 3 примера — ступень),
@@ -279,10 +292,11 @@ function update(dt) {
   const bu = boyU();
   for (const o of obstacles) {
     o.u += dt / TRAVEL;
-    if (!o.overBoy && o.u >= bu) {          // камень дошёл до Арэна
+    if (!o.overBoy && o.u >= bu) {          // препятствие дошло до Арэна
       o.overBoy = true;
-      if (batteries > 0) { batteries--; jumpT = 0; }        // прыжок!
-      else {                                                 // споткнулся
+      const cost = o.type === 'rock' ? 2 : 1; // камень тяжелее бревна
+      if (batteries >= cost) { batteries -= cost; jumpT = 0; } // прыжок!
+      else {                                                    // споткнулся
         wolfGap -= STUMBLE_COST;
         stumbleT = 0;
         if (navigator.vibrate) navigator.vibrate(150);

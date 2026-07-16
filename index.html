@@ -73,6 +73,7 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<button id="sndBtn" style="position:fixed;top:calc(10px + env(safe-area-inset-top));right:10px;z-index:8;border:none;background:rgba(255,251,233,.9);border-radius:50%;width:42px;height:42px;font-size:20px;box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:pointer;">🔊</button>
 
 <div id="hud" class="hidden"><div id="score">0</div></div>
 
@@ -300,6 +301,18 @@ function pixelHit(hs, hm, tile, tm) {
 const music = new Audio('assets/music.mp3');
 music.loop = true;
 music.volume = 0.55;
+// кнопка звука (настройка общая для обеих игр)
+const sndBtn = document.getElementById('sndBtn');
+let muted = localStorage.getItem('snd_muted') === '1';
+function applyMute() { music.muted = muted; sndBtn.textContent = muted ? '🔇' : '🔊'; }
+sndBtn.addEventListener('pointerdown', e => e.stopPropagation());
+sndBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  muted = !muted;
+  localStorage.setItem('snd_muted', muted ? '1' : '0');
+  applyMute();
+});
+applyMute();
 
 /* ================= GAME STATE ================= */
 const HUD = document.getElementById('hud');
