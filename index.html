@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#7ec8f0">
+<title>Полёт в школу 🇦🇲</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; overflow:hidden; background:#7ec8f0; font-family:'Segoe UI', system-ui, sans-serif; touch-action:none; }
+  #game { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  .overlay {
+    position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(20,40,70,.45); backdrop-filter:blur(4px); z-index:10; padding:24px; text-align:center;
+  }
+  .hidden { display:none !important; }
+  .card {
+    background:#fffbe9; border-radius:24px; padding:28px 24px; max-width:360px; width:100%;
+    box-shadow:0 12px 40px rgba(0,0,0,.35); border:4px solid #f4a825;
+  }
+  h1 { font-size:28px; color:#2b3a67; margin-bottom:4px; }
+  .sub { font-size:14px; color:#6b7a99; margin-bottom:18px; line-height:1.45; }
+  .btn {
+    display:inline-block; border:none; cursor:pointer; font-weight:800; font-size:20px;
+    padding:14px 42px; border-radius:999px; color:#fff;
+    background:linear-gradient(180deg,#ff9f43,#f4640e); box-shadow:0 6px 0 #c24a05, 0 10px 20px rgba(0,0,0,.25);
+    transition:transform .08s;
+  }
+  .btn:active { transform:translateY(4px); box-shadow:0 2px 0 #c24a05; }
+  .modes { display:flex; gap:8px; justify-content:center; margin-bottom:20px; }
+  .mode {
+    flex:1; padding:10px 8px; border-radius:14px; border:3px solid #d8d2ba; background:#fff;
+    font-size:13px; font-weight:700; color:#6b7a99; cursor:pointer;
+  }
+  .mode.on { border-color:#f4640e; color:#f4640e; background:#fff3e6; }
+  .mode small { display:block; font-weight:400; font-size:11px; margin-top:2px; }
+  #hud {
+    position:fixed; top:calc(10px + env(safe-area-inset-top)); left:0; right:0; z-index:5;
+    display:flex; justify-content:center; pointer-events:none;
+  }
+  #score {
+    font-size:44px; font-weight:900; color:#fff; text-shadow:0 3px 0 rgba(43,58,103,.6), 0 6px 14px rgba(0,0,0,.3);
+  }
+  #micbar {
+    position:fixed; left:calc(10px + env(safe-area-inset-left)); top:50%; transform:translateY(-50%);
+    width:14px; height:44vh; background:rgba(255,255,255,.25); border-radius:99px; z-index:5; overflow:hidden;
+    border:2px solid rgba(255,255,255,.5); pointer-events:none;
+  }
+  #micfill {
+    position:absolute; left:0; right:0; height:12px; border-radius:99px;
+    background:linear-gradient(180deg,#ffe25e,#ff9f43); bottom:0; transition:bottom .06s linear;
+    box-shadow:0 0 10px #ffe25e;
+  }
+  #bigscore { font-size:64px; font-weight:900; color:#f4640e; margin:6px 0 2px; }
+  #best { color:#6b7a99; font-size:14px; margin-bottom:16px; }
+  .err { color:#c0392b; font-size:13px; margin-top:12px; display:none; }
+  .flag { display:inline-block; width:34px; height:22px; border-radius:4px; overflow:hidden; vertical-align:middle;
+    box-shadow:0 2px 6px rgba(0,0,0,.2); }
+  .flag div { height:33.34%; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden"><div id="score">0</div></div>
+<div id="diag" class="hidden" style="position:fixed;top:calc(10px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));z-index:6;pointer-events:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:#fff;background:rgba(43,58,103,.72);padding:8px 10px;border-radius:12px;min-width:150px;">
+  <div id="diagMic">🎤 …</div>
+  <div style="display:flex;align-items:center;gap:6px;">🔊
+    <div style="flex:1;height:8px;background:rgba(255,255,255,.25);border-radius:99px;overflow:hidden;">
+      <div id="diagVol" style="height:100%;width:0%;background:linear-gradient(90deg,#ffe25e,#ff9f43);border-radius:99px;"></div>
+    </div>
+    <span id="diagVolTxt" style="min-width:34px;text-align:right;">0%</span>
+  </div>
+  <div id="diagPitch">🎵 —</div>
+</div>
+<div id="micHint" class="hidden" style="position:fixed;bottom:calc(14px + env(safe-area-inset-bottom));left:0;right:0;text-align:center;z-index:5;pointer-events:none;">
+  <span style="background:rgba(43,58,103,.75);color:#fff;font-size:13px;font-weight:600;padding:8px 14px;border-radius:999px;">🎤 нет микрофона — держи палец на экране, чтобы лететь вверх</span>
+</div>
+<div id="micbar" class="hidden"><div id="micfill"></div></div>
+
+<!-- START -->
+<div id="startOverlay" class="overlay">
+  <div class="card">
+    <h1>Полёт в школу</h1>
+    <div class="sub">
+      <span class="flag"><div style="background:#d90012"></div><div style="background:#0033a0"></div><div style="background:#f2a800"></div></span>
+      &nbsp;Каникулы кончились! Помоги Арэну долететь до школы над долиной Арарата.<br><br>
+      🎤 <b>Пой в микрофон:</b> выше нота — выше летишь, ниже нота — опускаешься. Молчишь — падаешь!
+    </div>
+    <div class="modes">
+      <button class="mode on" id="modePitch">🎵 Высота тона<small>пой ноты</small></button>
+      <button class="mode" id="modeVol">📢 Громкость<small>кричи громче</small></button>
+    </div>
+    <button class="btn" id="startBtn">СТАРТ ▶</button>
+    <div class="err" id="micErr">Не удалось включить микрофон 😢<br>Разреши доступ и попробуй снова. Пока можно играть, удерживая палец на экране.</div>
+  </div>
+</div>
+
+<!-- GAME OVER -->
+<div id="overOverlay" class="overlay hidden">
+  <div class="card">
+    <h1>Ой! 📚</h1>
+    <div class="sub">Арэн врезался! Но до школы ещё можно успеть.</div>
+    <div id="bigscore">0</div>
+    <div id="best">Рекорд: 0</div>
+    <button class="btn" id="retryBtn">ЕЩЁ РАЗ 🔄</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ================= CANVAS ================= */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize); resize();
+
+/* ================= SVG ASSETS (generated art) ================= */
+function svgImg(svg) {
+  const img = new Image();
+  img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  return img;
+}
+
+// Boy on a paper airplane
+const heroImg = svgImg(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 140">
+  <!-- paper plane -->
+  <polygon points="5,95 195,60 90,120" fill="#ffffff" stroke="#b9c6d8" stroke-width="4" stroke-linejoin="round"/>
+  <polygon points="5,95 195,60 80,88" fill="#e8eef6" stroke="#b9c6d8" stroke-width="4" stroke-linejoin="round"/>
+  <polygon points="80,88 195,60 90,120" fill="#cfdcec"/>
+  <!-- boy -->
+  <g>
+    <!-- backpack -->
+    <rect x="58" y="38" width="30" height="34" rx="9" fill="#d90012"/>
+    <rect x="63" y="46" width="20" height="12" rx="4" fill="#f2a800"/>
+    <!-- body -->
+    <rect x="82" y="34" width="34" height="40" rx="12" fill="#0033a0"/>
+    <!-- arm waving -->
+    <rect x="106" y="14" width="10" height="30" rx="5" fill="#0033a0" transform="rotate(18 111 29)"/>
+    <circle cx="120" cy="12" r="6" fill="#f6c9a0"/>
+    <!-- head -->
+    <circle cx="100" cy="20" r="16" fill="#f6c9a0"/>
+    <path d="M84 16 q16 -14 32 0 q-4 -12 -16 -12 q-12 0 -16 12z" fill="#4a2c17"/>
+    <circle cx="94" cy="19" r="2.4" fill="#222"/>
+    <circle cx="106" cy="19" r="2.4" fill="#222"/>
+    <path d="M96 27 q4 4 8 0" stroke="#222" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <circle cx="90" cy="24" r="2.6" fill="#f19f9f" opacity=".7"/>
+    <circle cx="110" cy="24" r="2.6" fill="#f19f9f" opacity=".7"/>
+    <!-- legs -->
+    <rect x="86" y="70" width="10" height="18" rx="5" fill="#31394a"/>
+    <rect x="100" y="70" width="10" height="18" rx="5" fill="#31394a"/>
+  </g>
+</svg>`);
+
+// Stack of books (bottom obstacle) — tiling unit
+const booksImg = svgImg(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 400" preserveAspectRatio="none">
+  <g stroke="#00000022" stroke-width="2">
+    <rect x="4"  y="0"   width="112" height="44" rx="7" fill="#d94f30"/>
+    <rect x="10" y="44"  width="100" height="42" rx="7" fill="#2e86ab"/>
+    <rect x="2"  y="86"  width="116" height="46" rx="7" fill="#f2a800"/>
+    <rect x="8"  y="132" width="104" height="42" rx="7" fill="#6a4c93"/>
+    <rect x="4"  y="174" width="112" height="44" rx="7" fill="#1b998b"/>
+    <rect x="12" y="218" width="98"  height="42" rx="7" fill="#d90012"/>
+    <rect x="2"  y="260" width="116" height="46" rx="7" fill="#e07be0"/>
+    <rect x="8"  y="306" width="104" height="46" rx="7" fill="#3d5a80"/>
+    <rect x="4"  y="352" width="112" height="48" rx="7" fill="#c17817"/>
+  </g>
+  <g fill="#ffffff" opacity=".85">
+    <rect x="20" y="14"  width="60" height="7" rx="3"/>
+    <rect x="26" y="100" width="52" height="7" rx="3"/>
+    <rect x="20" y="188" width="60" height="7" rx="3"/>
+    <rect x="28" y="276" width="50" height="7" rx="3"/>
+    <rect x="22" y="368" width="56" height="7" rx="3"/>
+  </g>
+</svg>`);
+
+// Hanging pomegranate branch (top obstacle)
+const pomImg = svgImg(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 400" preserveAspectRatio="none">
+  <rect x="48" y="0" width="24" height="400" rx="10" fill="#7a5230"/>
+  <rect x="54" y="0" width="6" height="400" fill="#95684080"/>
+  <g>
+    <ellipse cx="30" cy="60"  rx="26" ry="18" fill="#3e7a3e"/>
+    <ellipse cx="92" cy="120" rx="26" ry="18" fill="#4c8f46"/>
+    <ellipse cx="28" cy="190" rx="26" ry="18" fill="#3e7a3e"/>
+    <ellipse cx="92" cy="255" rx="26" ry="18" fill="#4c8f46"/>
+    <ellipse cx="30" cy="320" rx="26" ry="18" fill="#3e7a3e"/>
+  </g>
+  <g stroke="#5c1010" stroke-width="3">
+    <circle cx="34" cy="95"  r="17" fill="#c1272d"/>
+    <circle cx="88" cy="160" r="17" fill="#d90012"/>
+    <circle cx="32" cy="228" r="17" fill="#c1272d"/>
+    <circle cx="88" cy="295" r="17" fill="#d90012"/>
+    <circle cx="36" cy="358" r="17" fill="#c1272d"/>
+  </g>
+  <g fill="#5c1010">
+    <path d="M30 76 l4 -8 4 8z"/><path d="M84 141 l4 -8 4 8z"/>
+    <path d="M28 209 l4 -8 4 8z"/><path d="M84 276 l4 -8 4 8z"/><path d="M32 339 l4 -8 4 8z"/>
+  </g>
+  <g fill="#ffffff40">
+    <circle cx="28" cy="90" r="5"/><circle cx="82" cy="155" r="5"/>
+    <circle cx="26" cy="223" r="5"/><circle cx="82" cy="290" r="5"/><circle cx="30" cy="353" r="5"/>
+  </g>
+</svg>`);
+
+/* ============ AI-GENERATED ASSETS (FLUX.1-schnell via Hugging Face) ============ */
+function loadImg(src) { const i = new Image(); i.src = src; return i; }
+const gen = {
+  bg: loadImg('assets/bg.jpg'),
+  hero: loadImg('assets/hero.png'),
+  books: loadImg('assets/books.png'),
+  pom: loadImg('assets/pom.png'),
+};
+const ok = i => i.complete && i.naturalWidth > 0;
+
+/* ============ PIXEL-PERFECT COLLISION (alpha masks) ============ */
+let masks = null, masksTried = false;
+function buildMask(img, targetW) {
+  const s = Math.min(1, targetW / img.naturalWidth);
+  const w = Math.max(1, Math.round(img.naturalWidth * s));
+  const h = Math.max(1, Math.round(img.naturalHeight * s));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const cc = c.getContext('2d', { willReadFrequently: true });
+  cc.drawImage(img, 0, 0, w, h);
+  const d = cc.getImageData(0, 0, w, h).data;
+  const a = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) a[i] = d[i * 4 + 3];
+  return { w, h, a };
+}
+function ensureMasks() {
+  if (masksTried || !(ok(gen.hero) && ok(gen.books) && ok(gen.pom))) return;
+  masksTried = true;
+  try {
+    masks = {
+      hero: buildMask(gen.hero, 120),
+      books: buildMask(gen.books, 96),
+      pom: buildMask(gen.pom, 96),
+    };
+  } catch (e) { masks = null; } // file:// таинтит canvas — откат на прямоугольники
+}
+// hero bounding box — exactly matches how the sprite is drawn
+function heroBox() {
+  const w = hero.r * 3.0, h = w * gen.hero.naturalHeight / gen.hero.naturalWidth;
+  return { x: hero.x - w * 0.48, y: hero.y - h * 0.5, w, h };
+}
+// same tiling as drawObstacles — collision geometry mirrors the pixels on screen
+function obstacleTiles(o) {
+  const tiles = [];
+  const bh = o.w * gen.books.naturalHeight / gen.books.naturalWidth;
+  for (let y = o.gapY + o.gapH; y < H; y += bh - 2)
+    tiles.push({ kind: 'books', x: o.x, y, w: o.w, h: bh });
+  const ph = o.w * gen.pom.naturalHeight / gen.pom.naturalWidth;
+  if (o.gapY > 4)
+    for (let y = o.gapY; y > -ph; y -= ph - 2)
+      tiles.push({ kind: 'pom', x: o.x, y: y - ph, w: o.w, h: ph });
+  return tiles;
+}
+function pixelHit(hb, hm, tile, tm) {
+  const x1 = Math.max(hb.x, tile.x), y1 = Math.max(hb.y, tile.y);
+  const x2 = Math.min(hb.x + hb.w, tile.x + tile.w), y2 = Math.min(hb.y + hb.h, tile.y + tile.h);
+  if (x2 <= x1 || y2 <= y1) return false;
+  for (let py = y1; py < y2; py += 2) {
+    for (let px = x1; px < x2; px += 2) {
+      const hx = ((px - hb.x) / hb.w * hm.w) | 0, hy = ((py - hb.y) / hb.h * hm.h) | 0;
+      if (hm.a[hy * hm.w + hx] < 200) continue; // край героя прощаем
+      const tx = ((px - tile.x) / tile.w * tm.w) | 0, ty = ((py - tile.y) / tile.h * tm.h) | 0;
+      if (tm.a[ty * tm.w + tx] > 120) return true;
+    }
+  }
+  return false;
+}
+
+/* ================= AUDIO (mic) ================= */
+let audioCtx = null, analyser = null, timeBuf = null, micReady = false;
+let controlMode = 'pitch'; // 'pitch' | 'volume'
+
+async function initMic() {
+  // audioCtx is created synchronously in the click handler (iOS requirement)
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+  });
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  const src = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  src.connect(analyser);
+  timeBuf = new Float32Array(analyser.fftSize);
+  micReady = true;
+}
+
+// RMS volume 0..1
+function getRMS() {
+  analyser.getFloatTimeDomainData(timeBuf);
+  let s = 0;
+  for (let i = 0; i < timeBuf.length; i++) s += timeBuf[i] * timeBuf[i];
+  return Math.sqrt(s / timeBuf.length);
+}
+
+// Autocorrelation pitch detection -> Hz or -1
+function detectPitch() {
+  analyser.getFloatTimeDomainData(timeBuf); // FIX: буфер раньше не заполнялся в режиме pitch!
+  const buf = timeBuf, N = buf.length, sr = audioCtx.sampleRate;
+  let rms = 0;
+  for (let i = 0; i < N; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / N);
+  if (rms < 0.008) return -1; // silence gate
+
+  // trim quiet edges
+  let r1 = 0, r2 = N - 1;
+  const thr = 0.2;
+  for (let i = 0; i < N / 2; i++) if (Math.abs(buf[i]) < thr) { r1 = i; break; }
+  for (let i = 1; i < N / 2; i++) if (Math.abs(buf[N - i]) < thr) { r2 = N - i; break; }
+  const size = r2 - r1;
+  if (size < 200) return -1;
+
+  const c = new Float32Array(size);
+  for (let lag = 0; lag < size; lag++)
+    for (let i = 0; i < size - lag; i++)
+      c[lag] += buf[r1 + i] * buf[r1 + i + lag];
+
+  let d = 0; while (d < size - 1 && c[d] > c[d + 1]) d++;
+  let maxv = -1, maxp = -1;
+  for (let i = d; i < size; i++) if (c[i] > maxv) { maxv = c[i]; maxp = i; }
+  if (maxp <= 0) return -1;
+
+  // parabolic interpolation
+  let T = maxp;
+  const x1 = c[T - 1] || 0, x2 = c[T], x3 = c[T + 1] || 0;
+  const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
+  if (a) T = T - b / (2 * a);
+
+  const f = sr / T;
+  return (f > 70 && f < 1200) ? f : -1;
+}
+
+/* ================= GAME STATE ================= */
+const HUD = document.getElementById('hud');
+const MICBAR = document.getElementById('micbar');
+const MICFILL = document.getElementById('micfill');
+const scoreEl = document.getElementById('score');
+
+let state = 'menu'; // menu | play | over
+let hero = { x:0, y:0, vy:0, r:26, tilt:0 };
+let targetY = null;      // where the voice wants us to be (null = no signal)
+let obstacles = [];      // {x, gapY, gapH, w, passed}
+let score = 0, best = +(localStorage.getItem('bts_best') || 0);
+let speed = 0, spawnTimer = 0, t = 0;
+let touching = false;    // fallback control
+let smoothedPitch = 0, pitchAlive = 0;
+let clouds = [];
+
+function resetGame() {
+  hero.x = W * 0.26; hero.y = H * 0.45; hero.vy = 0; hero.tilt = 0;
+  obstacles = []; score = 0; t = 0;
+  speed = Math.max(W, 360) * 0.0032;   // px per ms-ish, scaled below
+  spawnTimer = 0; targetY = null; smoothedPitch = 0; pitchAlive = 0;
+  scoreEl.textContent = '0';
+  clouds = Array.from({length:5}, () => ({
+    x: Math.random()*W, y: Math.random()*H*0.5, s: 0.4+Math.random()*0.8
+  }));
+}
+
+/* ================= INPUT MAPPING ================= */
+// pitch range sung ↔ screen: ~130Hz (низко) … ~600Hz (высоко), log scale
+const PITCH_LO = 130, PITCH_HI = 600;
+function pitchToY(f) {
+  const k = (Math.log(f) - Math.log(PITCH_LO)) / (Math.log(PITCH_HI) - Math.log(PITCH_LO));
+  const kk = Math.min(1, Math.max(0, k));
+  return H * 0.92 - kk * H * 0.84; // высокая нота -> верх экрана
+}
+function volumeToY(v) {
+  // полный диапазон высоты — уже при небольшом усилении голоса (RMS ~0.1)
+  const k = Math.min(1, Math.max(0, (v - 0.015) / 0.09));
+  return H * 0.92 - k * H * 0.84;
+}
+
+let diagFrame = 0, lastF = -1;
+function readVoice() {
+  if (!micReady) { updateDiag(0, -1); return; }
+  const v = getRMS(); // always measured — feeds the signal indicator
+  if (controlMode === 'pitch') {
+    const f = detectPitch();
+    lastF = f;
+    if (f > 0) {
+      smoothedPitch = smoothedPitch ? smoothedPitch * 0.7 + f * 0.3 : f;
+      pitchAlive = 20; // ~0.33с удержания последней ноты — паузы в голосе не роняют
+    } else if (pitchAlive > 0) pitchAlive--;
+    if (pitchAlive > 0 && smoothedPitch) {
+      targetY = pitchToY(smoothedPitch);
+      const k = (Math.log(smoothedPitch)-Math.log(PITCH_LO))/(Math.log(PITCH_HI)-Math.log(PITCH_LO));
+      MICFILL.style.bottom = (Math.min(1,Math.max(0,k))*88) + '%';
+    } else { targetY = null; MICFILL.style.bottom = '0%'; }
+  } else {
+    lastF = -1;
+    if (v > 0.01) {
+      targetY = volumeToY(v);
+      MICFILL.style.bottom = (Math.min(1,Math.max(0,(v-0.015)/0.09))*88) + '%';
+    } else { targetY = null; MICFILL.style.bottom = '0%'; }
+  }
+  updateDiag(v, lastF);
+}
+
+// signal-strength indicator (top-left)
+const diagMic = document.getElementById('diagMic');
+const diagVol = document.getElementById('diagVol');
+const diagVolTxt = document.getElementById('diagVolTxt');
+const diagPitch = document.getElementById('diagPitch');
+function updateDiag(rms, f) {
+  if (diagFrame++ % 4 !== 0) return; // не дёргаем DOM каждый кадр
+  if (!micReady) {
+    diagMic.textContent = micRequested ? '🎤 жду доступ…' : '🎤 ❌ нет доступа';
+    diagVol.style.width = '0%'; diagVolTxt.textContent = '0%'; diagPitch.textContent = '🎵 —';
+    return;
+  }
+  diagMic.textContent = (audioCtx && audioCtx.state !== 'running')
+    ? '🎤 ⏸ звук на паузе — тапни экран'
+    : '🎤 ✅ слушаю';
+  const pct = Math.min(100, Math.round(rms * 400));
+  diagVol.style.width = pct + '%';
+  diagVolTxt.textContent = pct + '%';
+  if (controlMode === 'pitch') {
+    diagPitch.textContent = (pitchAlive > 0 && smoothedPitch)
+      ? '🎵 ' + Math.round(smoothedPitch) + ' Гц ' + (smoothedPitch > 300 ? '⬆️' : '⬇️')
+      : '🎵 — (пой громче)';
+  } else {
+    diagPitch.textContent = '📢 режим громкости';
+  }
+}
+
+/* ================= OBSTACLES ================= */
+function spawnObstacle() {
+  const gapH = Math.max(H * 0.30 - score * 3, H * 0.19); // narrows with score
+  const margin = H * 0.12;
+  const gapY = margin + Math.random() * (H - margin * 2 - gapH);
+  obstacles.push({ x: W + 80, gapY, gapH, w: Math.max(64, W*0.13), passed:false });
+}
+
+/* ================= UPDATE ================= */
+function update(dt) {
+  t += dt;
+  readVoice();
+
+  // hero physics
+  if (touching && !micReady) {
+    hero.vy -= 0.0016 * dt * H; // fallback: hold to rise
+  }
+  if (targetY !== null) {
+    // voice steers: spring toward target — вниз мягче, чем вверх
+    const diff = targetY - hero.y;
+    const gain = diff > 0 ? 0.00016 : 0.00035;
+    hero.vy += diff * gain * dt;
+    hero.vy *= 0.90;
+    const maxDown = H * 0.0035; // ограничение скорости снижения
+    if (hero.vy > maxDown) hero.vy = maxDown;
+  } else {
+    hero.vy += 0.0007 * dt * (H / 640); // gravity when silent (смягчена)
+    const maxFall = H * 0.0046;
+    if (hero.vy > maxFall) hero.vy = maxFall;
+  }
+  hero.vy = Math.max(-0.9, Math.min(0.9, hero.vy / H)) * H; // clamp relative
+  hero.y += hero.vy * dt * 0.06;
+  hero.tilt += ((hero.vy > 0 ? 0.35 : -0.35) - hero.tilt) * 0.08;
+
+  // bounds
+  if (hero.y < hero.r) { hero.y = hero.r; hero.vy = 0; }
+  if (hero.y > H - hero.r*0.6) return gameOver();
+
+  // difficulty
+  const spd = speed * (1 + Math.min(score * 0.03, 1.2)) * dt * 0.06;
+
+  // spawn
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnObstacle();
+    spawnTimer = Math.max(2400 - score * 40, 1500);
+  }
+
+  // move & collide
+  ensureMasks();
+  const usePixels = masks && ok(gen.hero);
+  const hb = usePixels ? heroBox() : null;
+  for (const o of obstacles) {
+    o.x -= spd;
+    if (!o.passed && o.x + o.w < hero.x - hero.r) {
+      o.passed = true; score++;
+      scoreEl.textContent = score;
+    }
+    if (usePixels) {
+      // pixel-perfect: only real opaque pixels kill
+      if (hb.x < o.x + o.w && hb.x + hb.w > o.x) {
+        for (const tile of obstacleTiles(o))
+          if (pixelHit(hb, masks.hero, tile, masks[tile.kind]))
+            return gameOver();
+      }
+    } else {
+      // fallback: circle vs two rects
+      const cx = Math.max(o.x, Math.min(hero.x, o.x + o.w));
+      if (Math.abs(hero.x - cx) < hero.r * 0.8) {
+        if (hero.y - hero.r * 0.55 < o.gapY || hero.y + hero.r * 0.55 > o.gapY + o.gapH)
+          return gameOver();
+      }
+    }
+  }
+  obstacles = obstacles.filter(o => o.x + o.w > -20);
+
+  // clouds
+  for (const c of clouds) {
+    c.x -= spd * 0.25 * c.s;
+    if (c.x < -160) { c.x = W + 160; c.y = Math.random()*H*0.5; }
+  }
+}
+
+/* ================= DRAW ================= */
+function drawBackground() {
+  if (ok(gen.bg)) {
+    // cover-fit the generated Ararat valley
+    const s = Math.max(W / gen.bg.naturalWidth, H / gen.bg.naturalHeight);
+    const dw = gen.bg.naturalWidth * s, dh = gen.bg.naturalHeight * s;
+    ctx.drawImage(gen.bg, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    // moving clouds on top for depth
+    ctx.fillStyle = '#ffffffbb';
+    for (const c of clouds) {
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 46*c.s, 18*c.s, 0, 0, 7);
+      ctx.ellipse(c.x+30*c.s, c.y+6*c.s, 34*c.s, 14*c.s, 0, 0, 7);
+      ctx.ellipse(c.x-30*c.s, c.y+7*c.s, 30*c.s, 13*c.s, 0, 0, 7);
+      ctx.fill();
+    }
+    return;
+  }
+  // sky
+  const sky = ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#8fd3f4'); sky.addColorStop(0.6,'#bfe7fa'); sky.addColorStop(1,'#eaf7d9');
+  ctx.fillStyle = sky; ctx.fillRect(0,0,W,H);
+
+  // sun
+  ctx.fillStyle = '#ffe25e';
+  ctx.beginPath(); ctx.arc(W*0.82, H*0.14, Math.min(W,H)*0.07, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ffe25e44';
+  ctx.beginPath(); ctx.arc(W*0.82, H*0.14, Math.min(W,H)*0.11, 0, 7); ctx.fill();
+
+  // Ararat: big + small peak
+  const baseY = H*0.86;
+  ctx.fillStyle = '#8fa3c7';
+  ctx.beginPath();
+  ctx.moveTo(-W*0.1, baseY);
+  ctx.lineTo(W*0.32, H*0.38);
+  ctx.lineTo(W*0.55, baseY);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(W*0.42, baseY);
+  ctx.lineTo(W*0.62, H*0.55);
+  ctx.lineTo(W*0.82, baseY);
+  ctx.closePath(); ctx.fill();
+  // snow caps
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(W*0.32, H*0.38);
+  ctx.lineTo(W*0.245, H*0.52);
+  ctx.lineTo(W*0.275, H*0.505); ctx.lineTo(W*0.30, H*0.53);
+  ctx.lineTo(W*0.325, H*0.50); ctx.lineTo(W*0.35, H*0.525);
+  ctx.lineTo(W*0.385, H*0.52);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(W*0.62, H*0.55);
+  ctx.lineTo(W*0.575, H*0.635);
+  ctx.lineTo(W*0.60, H*0.62); ctx.lineTo(W*0.62, H*0.645);
+  ctx.lineTo(W*0.645, H*0.615);
+  ctx.lineTo(W*0.665, H*0.635);
+  ctx.closePath(); ctx.fill();
+
+  // field
+  ctx.fillStyle = '#a8cf74';
+  ctx.fillRect(0, baseY, W, H-baseY);
+  ctx.fillStyle = '#8fbb5a';
+  ctx.beginPath();
+  ctx.ellipse(W*0.3, baseY+6, W*0.4, 14, 0, 0, 7);
+  ctx.fill();
+
+  // school far away
+  const sx = W*0.72, sy = baseY;
+  ctx.fillStyle = '#e8d9c0';
+  ctx.fillRect(sx, sy-46, 74, 46);
+  ctx.fillStyle = '#c1272d';
+  ctx.beginPath(); ctx.moveTo(sx-6, sy-46); ctx.lineTo(sx+37, sy-70); ctx.lineTo(sx+80, sy-46); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#7a5230'; ctx.fillRect(sx+30, sy-22, 14, 22);
+  ctx.fillStyle = '#9ad1e8'; ctx.fillRect(sx+8, sy-36, 12, 12); ctx.fillRect(sx+54, sy-36, 12, 12);
+
+  // clouds
+  ctx.fillStyle = '#ffffffcc';
+  for (const c of clouds) {
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, 46*c.s, 18*c.s, 0, 0, 7);
+    ctx.ellipse(c.x+30*c.s, c.y+6*c.s, 34*c.s, 14*c.s, 0, 0, 7);
+    ctx.ellipse(c.x-30*c.s, c.y+7*c.s, 30*c.s, 13*c.s, 0, 0, 7);
+    ctx.fill();
+  }
+}
+
+function drawObstacles() {
+  const usePng = ok(gen.books) && ok(gen.pom);
+  for (const o of obstacles) {
+    // top: pomegranate branch, bottom: books
+    const topH = o.gapY;
+    const botY = o.gapY + o.gapH;
+    if (usePng) {
+      // aspect-correct tiles instead of stretching
+      const bh = o.w * gen.books.naturalHeight / gen.books.naturalWidth;
+      for (let y = botY; y < H; y += bh - 2)
+        ctx.drawImage(gen.books, o.x, y, o.w, bh);
+      if (topH > 4) {
+        const ph = o.w * gen.pom.naturalHeight / gen.pom.naturalWidth;
+        for (let y = topH; y > -ph; y -= ph - 2)
+          ctx.drawImage(gen.pom, o.x, y - ph, o.w, ph);
+      }
+    } else {
+      if (topH > 4)
+        ctx.drawImage(pomImg, o.x, topH - 400*(o.w/120), o.w, 400*(o.w/120));
+      ctx.drawImage(booksImg, o.x, botY, o.w, Math.max(H - botY, 10));
+    }
+  }
+}
+
+function drawHero() {
+  ctx.save();
+  ctx.translate(hero.x, hero.y + Math.sin(t*0.004)*3);
+  ctx.rotate(hero.tilt);
+  if (ok(gen.hero)) {
+    const w = hero.r*3.0, h = w * gen.hero.naturalHeight / gen.hero.naturalWidth;
+    ctx.drawImage(gen.hero, -w*0.48, -h*0.5, w, h);
+  } else {
+    const w = hero.r*3.4, h = w*0.7;
+    ctx.drawImage(heroImg, -w*0.5, -h*0.58, w, h);
+  }
+  ctx.restore();
+}
+
+function draw() {
+  drawBackground();
+  drawObstacles();
+  drawHero();
+}
+
+/* ================= LOOP ================= */
+let last = 0, raf = 0;
+function loop(ts) {
+  raf = requestAnimationFrame(loop);
+  const dt = Math.min(ts - last, 40); last = ts;
+  if (state === 'play') update(dt);
+  draw();
+}
+
+/* ================= FLOW ================= */
+const startOverlay = document.getElementById('startOverlay');
+const overOverlay = document.getElementById('overOverlay');
+
+function gameOver() {
+  state = 'over';
+  best = Math.max(best, score);
+  localStorage.setItem('bts_best', best);
+  document.getElementById('bigscore').textContent = score;
+  document.getElementById('best').textContent = 'Рекорд: ' + best;
+  HUD.classList.add('hidden'); MICBAR.classList.add('hidden');
+  document.getElementById('diag').classList.add('hidden');
+  document.getElementById('micHint').classList.add('hidden');
+  overOverlay.classList.remove('hidden');
+  if (navigator.vibrate) navigator.vibrate(120);
+}
+
+let micRequested = false;
+function startGame() {
+  // create/resume AudioContext synchronously inside the user gesture (iOS)
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // request mic in parallel — game starts immediately, voice attaches when granted
+  if (!micReady && !micRequested) {
+    micRequested = true;
+    initMic().then(() => {
+      document.getElementById('micErr').style.display = 'none';
+      document.getElementById('micHint').classList.add('hidden');
+      if (state === 'play') MICBAR.classList.remove('hidden');
+    }).catch(() => {
+      micRequested = false;
+      document.getElementById('micErr').style.display = 'block';
+      if (state === 'play') document.getElementById('micHint').classList.remove('hidden');
+    });
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  resetGame();
+  state = 'play';
+  startOverlay.classList.add('hidden');
+  overOverlay.classList.add('hidden');
+  HUD.classList.remove('hidden');
+  document.getElementById('diag').classList.remove('hidden');
+  if (micReady) MICBAR.classList.remove('hidden');
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('retryBtn').addEventListener('click', startGame);
+
+const mp = document.getElementById('modePitch'), mv = document.getElementById('modeVol');
+mp.addEventListener('click', () => { controlMode='pitch'; mp.classList.add('on'); mv.classList.remove('on'); });
+mv.addEventListener('click', () => { controlMode='volume'; mv.classList.add('on'); mp.classList.remove('on'); });
+
+// fallback touch control (if mic denied) + revive suspended audio on tap
+window.addEventListener('pointerdown', () => {
+  touching = true;
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+});
+window.addEventListener('pointerup', () => touching = false);
+window.addEventListener('pointercancel', () => touching = false);
+
+// debug: keyboard for desktop testing
+window.addEventListener('keydown', e => {
+  if (e.key === 'ArrowUp') { targetY = null; hero.vy = -H*0.006; }
+});
+
+requestAnimationFrame(ts => { last = ts; loop(ts); });
+</script>
+</body>
+</html>
