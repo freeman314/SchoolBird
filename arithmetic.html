@@ -219,157 +219,171 @@ window.addEventListener('keydown', e => {
 });
 
 /* ================= РАННЕР ================= */
-let state = 'menu'; // menu | play | over
+let state = 'menu'; // menu | play | caught | over
 let dist = 0;            // метры
 let batteries = 0;
 let score = 0;           // очки: по 1 за каждую заработанную батарейку
 let wolfGap = 12;        // метров до волков
-let obstacles = [];      // {u: 0..1, type}
-let spawnIn = 0, jumpT = -1, stumbleT = -1, flashBattery = 0, t = 0;
+let obstacles = [];      // {u: 0..1.2, type, overBoy, overWolf}
+let spawnIn = 0, jumpT = -1, stumbleT = -1, wolfJumpT = -1, caughtT = 0, flashBattery = 0, t = 0;
 let best = +(localStorage.getItem('arif_best_pts') || 0);
 const SPEED = 4;         // м/с бег
 const GAP_DRIFT = 0.35;  // м/с — насколько Арэн быстрее волков
 const STUMBLE_COST = 4;  // на сколько метров волки прыгают ближе
-const TRAVEL = 2600;     // мс: путь препятствия от горизонта до Арэна
+const TRAVEL = 3800;     // мс: путь камня от горизонта до нижнего края
+
+// перспектива дороги: u=0 горизонт, u=1 нижний край (камера)
+function pk(u) { return Math.pow(Math.max(0, Math.min(1.2, u)), 1.6); }
+function py(u) { return horizonY() + pk(u) * (H - horizonY()); }  // экранный y «ног»
+function ps(u) { return 0.15 + 0.85 * pk(u); }                     // экранный масштаб
+// позиция Арэна на дороге: волки далеко (20м) — он у горизонта, догоняют — приближается к нам
+function boyU() { return 0.30 + (1 - Math.min(1, wolfGap / 20)) * 0.60; }
 
 function resetGame() {
   dist = 0; batteries = 0; score = 0; wolfGap = 12; obstacles = [];
-  spawnIn = 6500; jumpT = -1; stumbleT = -1; solved = 0; t = 0; // батареек нет — успей решить первый пример!
+  spawnIn = 6500; jumpT = -1; stumbleT = -1; wolfJumpT = -1; solved = 0; t = 0; // батареек нет — успей решить первый пример!
   newProblem();
 }
 
 function update(dt) {
   t += dt;
+  if (state === 'caught') { // волки прыгают на Арэна
+    caughtT += dt;
+    if (caughtT > 750) showGameOver();
+    return;
+  }
   dist += SPEED * dt / 1000;
   wolfGap = Math.min(20, wolfGap + GAP_DRIFT * dt / 1000);
 
-  // спавн препятствий: чаще с дистанцией
+  // спавн: постепенно всё чаще
   spawnIn -= dt;
   if (spawnIn <= 0) {
-    obstacles.push({ u: 0, type: Math.random() < 0.5 ? 'rock' : 'log' });
-    spawnIn = Math.max(2300, 5000 - dist * 8) * (0.85 + Math.random() * 0.3);
+    obstacles.push({ u: 0, type: Math.random() < 0.5 ? 'rock' : 'log', overBoy: false, overWolf: false });
+    spawnIn = Math.max(1800, 5200 - dist * 6) * (0.85 + Math.random() * 0.3);
   }
 
-  // движение препятствий к Арэну
-  for (const o of obstacles) o.u += dt / TRAVEL;
-
-  const near = obstacles[0];
-  if (near) {
-    if (!near.jumped && near.u >= 0.80 && batteries > 0) {
-      batteries--; near.jumped = true; jumpT = 0; // прыжок! (1 батарейка за препятствие)
+  // камни едут по дороге на камеру
+  const bu = boyU();
+  for (const o of obstacles) {
+    o.u += dt / TRAVEL;
+    if (!o.overBoy && o.u >= bu) {          // камень дошёл до Арэна
+      o.overBoy = true;
+      if (batteries > 0) { batteries--; jumpT = 0; }        // прыжок!
+      else {                                                 // споткнулся
+        wolfGap -= STUMBLE_COST;
+        stumbleT = 0;
+        if (navigator.vibrate) navigator.vibrate(150);
+      }
     }
-    if (!near.jumped && near.u >= 0.97) {
-      // споткнулся
-      obstacles.shift();
-      wolfGap -= STUMBLE_COST;
-      stumbleT = 0;
-      if (navigator.vibrate) navigator.vibrate(150);
+    if (!o.overWolf && o.u >= 0.93) {       // камень докатился до волков — они тоже прыгают
+      o.overWolf = true;
+      wolfJumpT = 0;
     }
   }
-  obstacles = obstacles.filter(o => o.u < 1.15);
+  obstacles = obstacles.filter(o => o.u < 1.2);
 
-  if (jumpT >= 0) { jumpT += dt; if (jumpT > 700) jumpT = -1; }
+  if (jumpT >= 0) { jumpT += dt; if (jumpT > 650) jumpT = -1; }
   if (stumbleT >= 0) { stumbleT += dt; if (stumbleT > 500) stumbleT = -1; }
+  if (wolfJumpT >= 0) { wolfJumpT += dt; if (wolfJumpT > 600) wolfJumpT = -1; }
   if (flashBattery > 0) flashBattery -= dt;
 
   panel.classList.toggle('alarm', batteries === 0);
 
-  if (wolfGap <= 0.3) return gameOver();
+  if (wolfGap <= 0.3) { state = 'caught'; caughtT = 0; if (navigator.vibrate) navigator.vibrate([100, 60, 200]); }
 }
 
 /* ================= РИСОВАНИЕ ================= */
 function horizonY() { return H * 0.24; }
-function boyY() { return H * 0.86; }
-function sizeBase() { return Math.min(W, H * 0.9); } // спрайты не раздуваются на широких экранах
-function roadHalf(k) { return (W * 0.055) + k * (W * 0.44 - W * 0.055); } // k: 0 горизонт, 1 низ
+function sizeBase() { return Math.min(W, H * 0.9); }
 
 function drawScene() {
   const hy = horizonY();
-  // небо + Арарат: верхняя часть готового фона
   if (ok(A.bg)) {
     const iw = A.bg.naturalWidth, ih = A.bg.naturalHeight;
     const srcH = ih * 0.52;
-    const s = Math.max(W / iw, (hy + 30) / srcH);
-    ctx.drawImage(A.bg, 0, 0, iw, srcH, (W - iw * s) / 2, (hy + 30) - srcH * s, iw * s, srcH * s);
+    const sc = Math.max(W / iw, (hy + 30) / srcH);
+    ctx.drawImage(A.bg, 0, 0, iw, srcH, (W - iw * sc) / 2, (hy + 30) - srcH * sc, iw * sc, srcH * sc);
   } else {
     ctx.fillStyle = '#8fd3f4'; ctx.fillRect(0, 0, W, hy + 30);
   }
-  // поля
   const g = ctx.createLinearGradient(0, hy, 0, H);
   g.addColorStop(0, '#b9d98a'); g.addColorStop(1, '#8fbb5a');
   ctx.fillStyle = g; ctx.fillRect(0, hy, W, H - hy);
   // дорога-трапеция
+  const half = k => (W * 0.055) + pk(k) * (W * 0.46 - W * 0.055);
   ctx.fillStyle = '#d9b878';
   ctx.beginPath();
-  ctx.moveTo(W / 2 - roadHalf(0), hy);
-  ctx.lineTo(W / 2 + roadHalf(0), hy);
-  ctx.lineTo(W / 2 + roadHalf(1), H);
-  ctx.lineTo(W / 2 - roadHalf(1), H);
+  ctx.moveTo(W / 2 - half(0), hy);
+  ctx.lineTo(W / 2 + half(0), hy);
+  ctx.lineTo(W / 2 + half(1), H);
+  ctx.lineTo(W / 2 - half(1), H);
   ctx.closePath(); ctx.fill();
-  // обочины
   ctx.strokeStyle = '#c9a45e'; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(W/2 - roadHalf(0), hy); ctx.lineTo(W/2 - roadHalf(1), H); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(W/2 + roadHalf(0), hy); ctx.lineTo(W/2 + roadHalf(1), H); ctx.stroke();
-  // бегущая разметка (перспектива)
+  ctx.beginPath(); ctx.moveTo(W/2 - half(0), hy); ctx.lineTo(W/2 - half(1), H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2 + half(0), hy); ctx.lineTo(W/2 + half(1), H); ctx.stroke();
+  // бегущая разметка — та же скорость, что у камней (дорога и камни едут вместе)
   ctx.fillStyle = '#fff8e0aa';
-  const scroll = (t * 0.00045) % (1 / 6);
-  for (let i = 0; i < 8; i++) {
-    const k0 = i / 6 + scroll;
-    if (k0 > 1) continue;
-    const k = k0 * k0; // ускорение к низу — эффект перспективы
-    const y = hy + k * (H - hy);
-    const wDash = 6 + k * 18, hDash = 4 + k * 22;
-    ctx.fillRect(W / 2 - wDash / 2, y, wDash, hDash);
+  const scroll = (t / TRAVEL) % (1 / 7);
+  for (let i = 0; i < 9; i++) {
+    const u = i / 7 + scroll;
+    if (u > 1) continue;
+    const y = py(u), sc = ps(u);
+    ctx.fillRect(W / 2 - 14 * sc / 2, y, 14 * sc, 30 * sc);
   }
 }
 
-function drawObstacles() {
-  for (const o of obstacles) {
-    const k = Math.min(1, o.u) ** 1.6;
-    const y = horizonY() + k * (boyY() + 30 - horizonY());
-    const img = o.type === 'rock' ? A.rock : A.log;
-    if (!ok(img)) continue;
-    const w = (o.type === 'rock' ? 0.24 : 0.36) * sizeBase() * (0.18 + 0.82 * k);
-    const h = w * img.naturalHeight / img.naturalWidth;
-    ctx.drawImage(img, W / 2 - w / 2, y - h, w, h);
-  }
+function drawObstacle(o) {
+  const img = o.type === 'rock' ? A.rock : A.log;
+  if (!ok(img)) return;
+  const sc = ps(o.u);
+  const w = (o.type === 'rock' ? 0.34 : 0.50) * sizeBase() * sc;
+  const h = w * img.naturalHeight / img.naturalWidth;
+  ctx.drawImage(img, W / 2 - w / 2, py(o.u) - h, w, h);
 }
 
 function drawBoy() {
   if (!ok(A.boy)) return;
-  const w = sizeBase() * 0.17, h = w * A.boy.naturalHeight / A.boy.naturalWidth;
-  let y = boyY(), sway = Math.sin(t * 0.012) * W * 0.012, hop = Math.abs(Math.sin(t * 0.012)) * 5;
+  const u = boyU(), sc = ps(u);
+  const w = sizeBase() * 0.42 * sc, h = w * A.boy.naturalHeight / A.boy.naturalWidth;
+  const sway = Math.sin(t * 0.012) * W * 0.010 * sc;
+  const hop = Math.abs(Math.sin(t * 0.012)) * 6 * sc;
+  let y = py(u);
   let jump = 0;
-  if (jumpT >= 0) jump = Math.sin(Math.min(1, jumpT / 700) * Math.PI) * H * 0.09;
-  // тень
+  if (jumpT >= 0) jump = Math.sin(Math.min(1, jumpT / 650) * Math.PI) * 110 * sc;
+  // при поимке Арэн дёргается
+  const shakeX = (stumbleT >= 0 || state === 'caught') ? (Math.random() - 0.5) * 8 : 0;
   ctx.fillStyle = 'rgba(0,0,0,.18)';
   ctx.beginPath();
-  ctx.ellipse(W / 2 + sway, y + 6, w * 0.34, 8, 0, 0, 7);
+  ctx.ellipse(W / 2 + sway, y + 4 * sc, w * 0.32, 6 * sc + 3, 0, 0, 7);
   ctx.fill();
-  const shakeX = stumbleT >= 0 ? (Math.random() - 0.5) * 8 : 0;
   ctx.drawImage(A.boy, W / 2 - w / 2 + sway + shakeX, y - h - hop - jump, w, h);
 }
 
 function drawWolves() {
   if (!ok(A.wolf)) return;
-  // gap 20м -> головы у нижнего края; gap 0 -> вплотную к Арэну
-  const k = 1 - Math.min(1, wolfGap / 20); // 0 далеко, 1 близко
-  const yBase = (H + 30) - k * ((H + 30) - (boyY() + 26));
-  const w = sizeBase() * (0.26 + 0.10 * k);
+  // волки всегда в кадре — у нижнего края, крупные (они ближе всех к камере)
+  const w = sizeBase() * 0.36;
   const h = w * A.wolf.naturalHeight / A.wolf.naturalWidth;
-  const lunge = stumbleT >= 0 ? Math.sin(Math.min(1, stumbleT / 500) * Math.PI) * 30 : 0;
+  let lungeY = 0, lungeS = 1;
+  if (state === 'caught') { // финальный прыжок на Арэна
+    const kk = Math.min(1, caughtT / 750);
+    const bu = boyU();
+    lungeY = kk * (py(0.97) - py(bu));   // от своего края к Арэну
+    lungeS = 1 - kk * 0.5;               // уменьшаются, «улетая» вглубь
+  }
+  const hopAll = wolfJumpT >= 0 ? Math.sin(Math.min(1, wolfJumpT / 600) * Math.PI) * 64 : 0;
   const positions = [
-    { x: W * 0.30, dy: 0, flip: false, ph: 0 },
-    { x: W * 0.66, dy: 22, flip: true, ph: 2 },
-    { x: W * 0.48, dy: 46, flip: false, ph: 4 },
+    { x: W * 0.26, dy: 0,  flip: false, ph: 0 },
+    { x: W * 0.70, dy: 10, flip: true,  ph: 2 },
+    { x: W * 0.48, dy: 26, flip: false, ph: 4 },
   ];
   for (const p of positions) {
-    const bob = Math.abs(Math.sin(t * 0.01 + p.ph)) * 8;
+    const bob = Math.abs(Math.sin(t * 0.011 + p.ph)) * 9;
+    const ww = w * lungeS, hh = h * lungeS;
+    const feet = H + 26 + p.dy - lungeY;
     ctx.save();
-    if (p.flip) {
-      ctx.translate(p.x + w / 2, 0); ctx.scale(-1, 1); ctx.translate(-(p.x + w / 2), 0);
-    }
-    ctx.drawImage(A.wolf, p.x - w / 2, yBase + p.dy - h - bob - lunge, w, h);
+    if (p.flip) { ctx.translate(p.x, 0); ctx.scale(-1, 1); ctx.translate(-p.x, 0); }
+    ctx.drawImage(A.wolf, p.x - ww / 2, feet - hh - bob - hopAll, ww, hh);
     ctx.restore();
   }
 }
@@ -377,14 +391,12 @@ function drawWolves() {
 function drawHUD() {
   ctx.font = '800 20px system-ui';
   ctx.textBaseline = 'top';
-  // батарейки
   ctx.fillStyle = flashBattery > 0 ? '#1b998b' : '#2b3a67';
   const pulse = flashBattery > 0 ? 1 + Math.sin(flashBattery * 0.02) * 0.1 : 1;
   ctx.save();
   ctx.translate(14, 12); ctx.scale(pulse, pulse);
   ctx.fillText('⚡ ' + batteries, 0, 0);
   ctx.restore();
-  // очки и дистанция
   ctx.fillStyle = '#2b3a67';
   ctx.textAlign = 'center';
   ctx.fillText('🏆 ' + score, W / 2, 12);
@@ -392,26 +404,27 @@ function drawHUD() {
   ctx.fillStyle = '#4a5a80';
   ctx.fillText(Math.floor(dist) + ' м', W / 2, 36);
   ctx.font = '800 20px system-ui';
-  // волки
   ctx.textAlign = 'right';
   ctx.fillStyle = wolfGap < 5 ? '#c0392b' : '#2b3a67';
-  ctx.fillText('🐺 ' + wolfGap.toFixed(0) + ' м', W - 14, 12);
+  ctx.fillText('🐺 ' + Math.max(0, wolfGap).toFixed(0) + ' м', W - 14, 12);
   ctx.textAlign = 'left';
-  // красная вспышка при спотыкании
-  if (stumbleT >= 0) {
-    ctx.fillStyle = `rgba(220,40,40,${0.35 * (1 - stumbleT / 500)})`;
+  if (stumbleT >= 0 || state === 'caught') {
+    const a = state === 'caught' ? 0.30 : 0.35 * (1 - stumbleT / 500);
+    ctx.fillStyle = `rgba(220,40,40,${a})`;
     ctx.fillRect(0, 0, W, H);
   }
 }
 
 function draw() {
   ctx.clearRect(0, 0, W, H);
-  const shake = stumbleT >= 0 ? 1 : 0;
   ctx.save();
-  if (shake) ctx.translate((Math.random() - .5) * 6, (Math.random() - .5) * 6);
+  if (stumbleT >= 0 || state === 'caught') ctx.translate((Math.random() - .5) * 6, (Math.random() - .5) * 6);
   drawScene();
-  drawObstacles();
+  // порядок по глубине: всё, что дальше по дороге, рисуем раньше
+  const bu = boyU();
+  for (const o of obstacles) if (o.u <= bu) drawObstacle(o);
   drawBoy();
+  for (const o of obstacles) if (o.u > bu) drawObstacle(o);
   drawWolves();
   ctx.restore();
   drawHUD();
@@ -423,14 +436,14 @@ function loop(ts) {
   requestAnimationFrame(loop);
   const dt = Math.min(ts - last, 40); last = ts;
   if (!W || !H) { resize(); return; }
-  if (state === 'play') update(dt);
+  if (state === 'play' || state === 'caught') update(dt);
   draw();
 }
 
 const startOverlay = document.getElementById('startOverlay');
 const overOverlay = document.getElementById('overOverlay');
 
-function gameOver() {
+function showGameOver() {
   state = 'over';
   best = Math.max(best, score);
   localStorage.setItem('arif_best_pts', best);
@@ -438,7 +451,6 @@ function gameOver() {
   document.getElementById('stats').textContent = `Пробег: ${Math.floor(dist)} м · Решено: ${solved} · Рекорд: ${best} очк.`;
   overOverlay.classList.remove('hidden');
   panel.classList.remove('alarm');
-  if (navigator.vibrate) navigator.vibrate([100, 60, 200]);
 }
 
 function startGame() {
